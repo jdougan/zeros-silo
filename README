@@ -1,0 +1,248 @@
+Silo -- a simple, general purpose file system for LSL via HTTP
+    version 2006-07-09-beta
+    by Zero Linden
+
+    Copyright (c) 2006 Linden Lab
+    Licensed under the "MIT" open source license.
+
+
+==== ABOUT ====
+
+Silo stores and retrieves data in an (almost) arbitrary tree of
+URLs on a web server.  It is very similar to a file system.  It was
+written to provide data storage for LSL scripts in Second Life.
+However, it is general enough to be used from other languages and
+systems, and to even store other kinds of data.  (Though LSL can
+only access text.)
+
+
+==== INSTALLATION ====
+
+Silo is installed on a web server that runs PHP.  You need PHP
+version 4.3.0 or later.  The instructions here are for the Apache
+web server and work with version 1 or 2 of the server.
+
+The installed silo script will have a "base URL" that is the start
+of the storage tree.  It will be highly dependent on your server
+configuration and the method you choose for installation.  This
+base URL is the access point to your silo.
+
+1) Pick a directory that can be served by the Apache web server.
+You might want to make a subdirectory just for silo.
+
+2) Put the file silo.php in that directory.
+
+3) Create a directory called data, and make sure that its permissions
+are set so that the Apache server can write to it.  It's not
+unreasonable to simply make it writable by all.  After all, that
+is what you are doing by deciding to store data via HTTP anyway!
+
+4) Depending on how your Apache server is set up, you may need
+changes to the Apache configuration.  Here are some examples of
+common Apache set-ups, but more complicated ones are certainly
+possible.
+
+
+    Configuration 1: Under the document root
+    ----------------------------------------
+    Apache's config file contains:
+        DocumentRoot /var/www/htdocs
+    
+    You create the directory:
+        /var/www/htdocs/sl-stuff
+    
+    Place silo.php there, and create data there with full permissions.
+    
+    The base URL for the silo will be:
+        http://www.example.com/sl-stuff/silo.php
+    
+    
+    Configuration 2: In user's public-html dir
+    ------------------------------------------
+    Apache's config file contains:
+        UserDir public_html
+        
+    You create the directory:
+        ~you/public_html/sl-stuff
+    
+    Place silo.php there, and create data there with full permissions.
+    
+    The base URL for the silo will be:
+        http://www.example.com/~you/sl-stuff/silo.php
+    
+    
+    Configuration 3: Outside the document tree
+    ------------------------------------------
+    Apache's config file contains:
+        Alias /silo/ /var/sl-stuff/silo/silo.php/
+        <Directory /var/sl-stuff/silo>
+            Order allow,deny
+            Allow from all
+        </Directory>
+    
+    You create the directory:
+        /var/sl-stuff/silo
+    
+    Place silo.php there, and create data there with full permissions.
+    
+    The base URL for the silo will be:
+        http://www.example.com/silo
+    
+    Note that in this configuration, the directory needn't be under
+    the document root, or the mapped user directories.  It is the
+    Alias directive that maps the directory, and provides the nice,
+    clean base URL.
+
+5) Test the set up by copying the files test.py and uuid.py to any
+machine that has python installed.  It needn't be the same machine
+as the server.  In a command shell, change to the the directory
+with test.py and uuid.py, and run:
+
+    python test.py <baseURL> -v
+
+Replacing <baseURL> with your actual base URL.  Note: This URL does
+NOT end in a slash.
+
+This should report that it passes all the tests.  If not, something
+might be wrong with your configuration, or there may be some
+incompatibility between the script and your system.  If you suspect
+the later, let me know the details!
+
+
+==== CONCEPTS ====
+
+Data is stored at paths under the base URL.  There are some
+restrictions on the path:
+    - the path components can contain only characters in the set:
+        - + _ % 0-9 a-z A-Z
+      Note that URL encoding any string meets these requirements,
+      as does calling LSL's llEscapeURL function.
+    - there must be at least one path component
+    - there can be no more than 11 path components
+
+For example, any of these are valid paths:
+    /tuna+fish
+    /007
+    /fruit/apple
+    /fruit/apple/fuji
+    /fruit/apple/gala
+    /fruit/banana
+    /9c84d7e2-713f-4269-a27b-14b133a0ec56
+
+Notice that unlike most file systems, you can store data at both a
+path ("/apple"), and at paths below it ("/apple/fuji").
+
+Using a UUID (or key in LSL) gives silo some optionally strong
+security.  Since keys are unguessable, when store a tree of data
+under a path starting with a key, there is no way for anyone to
+access that data, unless you give them the key.
+
+
+==== USE ====
+
+Data is stored and accessed via standard HTTP methods with a path:
+    GET - fetch data at the path
+    PUT - store data at the path
+    DELETE - remove data at the path
+
+When you end a path in a slash, these methods can be used:
+    GET - fetch a list of path parts under this one, one per line
+    DELETE - delete all paths under this one
+
+When storing data (PUT), you must be sure that both the 'content-type'
+(MIME Type) and 'content-length' headers are set.  When accessing
+from LSL, these are automatically set.
+
+All operations will return a non-error status (2xx) if the operation
+completed correctly.  For the PUT operation, you can use the status
+code to discover if the path was newsly created: It returns
+201 in that case.
+
+There is no need to store data a intermediate nodes before writing
+something lower down.  If you are storing at "/apple/fuji", you
+needn't have stored anything at "/apple".
+
+Note that you cannot use a path of just "/".  This means that no
+one can delete the entire silo, nor can anyone find out all the
+paths in the silo.  Because of this, if you use an unguessable UUID
+as the first path component, other users of the same silo cannot
+access your data unless you give them the UUID.
+
+
+---- From LSL ----
+
+You can make access easier by setting up this global:
+    string gBase = "http://www.example.com/silo";
+    
+Storing data:
+    string data = "something to store";
+    llHTTPRequest(gBase + "/apple", [ HTTP_METHOD, "PUT" ], data);
+
+Fetching data:
+    llHTTPRequest(gBase + "/apple", [ ], "");
+    ...
+    http_response(key req, integer status, list meta, string content)
+    {
+        if (status != 200) {
+            llOwnerSay("there was a problem: status = " + (string)status);
+        }
+        else {
+            data = content;
+        }
+    }
+
+Deleting data:
+    llHTTPRequest(gBase + "/apple", [ HTTP_METHOD, "DELETE" ], "");
+
+
+If you want to use the method of storing your data under a key,
+then you can set things up like this:
+    string gSilo = "http://www.example.com/silo/";
+    string gBase;
+        
+    initBase() {
+        string aKey;
+        
+        aKey = (string)llGetInventoryKey("storage key");
+            // make a notecard and add it to the inventory of each
+            // object that is accessing this data.  be sure the owner of
+            // the objects have modify, copy and transfer permissions
+            
+    // or
+        aKey = (string)llGetKey();
+            // only if this is not the root prim (otherwise the object key
+            // can be scanned for, be sure also that this prim doesn't talk
+            
+    // or
+        aKey = "9c84d7e2-713f-4269-a27b-14b133a0ec56"
+    
+    // but never
+        aKey = (string)llGetOwner();
+            // as the avatar keys are easily obtained
+        
+        gBase = gSilo + "/" + aKey;
+    }
+
+---- From CURL ----
+
+If you have access to 'curl' from a command shell, you can try out the
+silo easily using curl:
+
+    SILO=http://www.example.com/silo
+    
+    # Storing data
+    echo "some data" | curl --data-binary @- -X PUT -H 'Content-Type: text/plain' $SILO/apple
+    
+    # Fetching data
+    curl $SILO/apple
+    
+    # Deleting data
+    curl -X DELETE $SILO/apple
+    
+
+==== CONTACT ====
+
+This script was written by Zero Linden.  You can conact him at
+    zero.linden@lindenlab.com
+    
+
